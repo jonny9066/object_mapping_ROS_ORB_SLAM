@@ -50,6 +50,14 @@ class LocalMapping;
 class LoopClosing;
 class System;
 
+typedef struct object_detection_box {
+        int x;
+        int y;
+        int w;
+        int h;
+        std::string name;
+    } object_detection_box_struct;
+
 class Tracking
 {
 
@@ -115,6 +123,11 @@ public:
     bool mbOnlyTracking;
 
     void Reset();
+    void UpdateBoundingBox(int x, int y, int w, int h, const string& name);
+    // updates object points and then returns them, will be triggered with each new frame
+    std::vector<cv::Mat> GetObjectPoints();
+    std::vector<MapPoint*> GetCurrentObjectCloud();
+    object_detection_box_struct* GetLastBoundingBox();
 
 protected:
 
@@ -144,6 +157,7 @@ protected:
 
     bool NeedNewKeyFrame();
     void CreateNewKeyFrame();
+
 
     // In case of performing only localization, this flag is true when there are no matches to
     // points in the map. Still tracking will continue if there are enough matches with temporal points.
@@ -184,6 +198,15 @@ protected:
 
     //Map
     Map* mpMap;
+
+    // object detection
+    object_detection_box_struct object_detection_box;
+    bool BOUNDING_BOX_AVAILABLE = false;
+    std::vector<cv::Mat> objectBuckets;
+    std::vector<int> bucketScores;
+    std::deque<cv::Mat> candidateBuckets;
+    std::deque<int> candidateScores;
+    
 
     //Calibration matrix
     cv::Mat mK;

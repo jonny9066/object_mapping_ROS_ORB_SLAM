@@ -33,7 +33,7 @@
 #include <std_msgs/String.h>
 #include <opencv2/core/core.hpp>
 #include <tf/transform_broadcaster.h>
-//#include <sensor_msgs/CameraInfo.h>
+#include <sensor_msgs/CameraInfo.h>
 
 #include "System.h"
 #include "Node.h"
@@ -46,10 +46,12 @@ class MonoNode : public Node
     ~MonoNode ();
     void ImageCallback (const sensor_msgs::ImageConstPtr& msg);
     void ImageConfigCallback (const std_msgs::String::ConstPtr& msg);
+    void BoundingBoxCallback (const sensor_msgs::CameraInfo::ConstPtr& msg);
 
   private:
     image_transport::Subscriber image_subscriber;
     ros::Subscriber config_subscriber;
+    ros::Subscriber bounding_box_subscriber;
 };
 
 #endif //ORBSLAM2_ROS_MONONODE_H_

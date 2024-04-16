@@ -26,10 +26,25 @@ int main(int argc, char **argv)
 MonoNode::MonoNode (ORB_SLAM2::System::eSensor sensor, ros::NodeHandle &node_handle, image_transport::ImageTransport &image_transport) : Node (sensor, node_handle, image_transport) {
   image_subscriber = image_transport.subscribe ("/camera/image_raw", 1, &MonoNode::ImageCallback, this);
   config_subscriber = node_handle.subscribe ("/orb_slam2_mono/camera_config", 1, &MonoNode::ImageConfigCallback, this);
+  bounding_box_subscriber = node_handle.subscribe ("object_detection_box", 1, &MonoNode::BoundingBoxCallback, this);
 }
 
 
 MonoNode::~MonoNode () {
+}
+
+void MonoNode::BoundingBoxCallback (const sensor_msgs::CameraInfo::ConstPtr& msg) {
+    orb_slam_->mpTracker->UpdateBoundingBox(msg->binning_x, msg->binning_y, msg->width, msg->height, msg->distortion_model);
+
+    // cout<<"received boudning box"<<msg->binning_x<<msg->binning_y<<msg->height<<msg->width<<", type="<<msg->distortion_model<<endl;
+
+        // box_msg.binning_x = x
+        // box_msg.binning_y = y
+        // box_msg.width = w
+        // box_msg.height = h
+        // box_msg.distortion_model = name
+        // self.bounding_box_publisher.publish(box_msg)
+
 }
 
 

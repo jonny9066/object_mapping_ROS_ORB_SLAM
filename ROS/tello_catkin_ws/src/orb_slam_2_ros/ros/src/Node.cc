@@ -30,6 +30,8 @@ Node::Node (ORB_SLAM2::System::eSensor sensor, ros::NodeHandle &node_handle, ima
   rendered_image_publisher_ = image_transport.advertise (name_of_node_+"/debug_image", 1);
   if (publish_pointcloud_param_) {
     map_points_publisher_ = node_handle_.advertise<sensor_msgs::PointCloud2> (name_of_node_+"/map_points", 1);
+    object_points_publisher_ = node_handle_.advertise<sensor_msgs::PointCloud2> (name_of_node_+"/object_points", 1);
+    object_detections_publisher_ = node_handle_.advertise<sensor_msgs::PointCloud2> (name_of_node_+"/object_detections", 1);
   }
 
   // Enable publishing camera's pose as PoseStamped message
@@ -62,18 +64,75 @@ void Node::Update () {
     }
   }
 
-  PublishRenderedImage (orb_slam_->DrawCurrentFrame());
+  PublishRenderedImage (orb_slam_->DrawCurrentFrame(), orb_slam_->mpTracker->GetLastBoundingBox());
 
   if (publish_pointcloud_param_) {
-    PublishMapPoints (orb_slam_->GetAllMapPoints());
+    // PublishMapPoints (orb_slam_->GetAllMapPoints());
+    // std::vector<ORB_SLAM2::MapPoint*> object_points = orb_slam_->mpTracker->GetCurrentObjectCloud();
+
+    // std::vector<ORB_SLAM2::MapPoint*>  map_points = orb_slam_->GetAllMapPoints();
+
+
+                  //TODO orb_slam_->mpTracker->GetObjectPoints();
+
+    PublishMapPoints (orb_slam_->GetAllMapPoints(), orb_slam_->mpTracker->GetCurrentObjectCloud());
+    PublishObjectDetections(orb_slam_->mpTracker->GetObjectPoints());
   }
 
 }
+//  std::vector<cv::Mat> Tracking::GetObjectPoints(){
 
+void Node::PublishObjectDetections (std::vector<cv::Mat> object_points) {
+  if (object_points.size() == 0) {
+    return;
+  }
 
-void Node::PublishMapPoints (std::vector<ORB_SLAM2::MapPoint*> map_points) {
-  sensor_msgs::PointCloud2 cloud = MapPointsToPointCloud (map_points);
-  map_points_publisher_.publish (cloud);
+  sensor_msgs::PointCloud2 cloud;
+
+  const int num_channels = 3; // x y z
+
+  cloud.header.stamp = current_frame_time_;
+  cloud.header.frame_id = map_frame_id_param_;
+  cloud.height = 1;
+  cloud.width = object_points.size();
+  cloud.is_bigendian = false;
+  cloud.is_dense = true;
+  cloud.point_step = num_channels * sizeof(float);
+  cloud.row_step = cloud.point_step * cloud.width;
+  cloud.fields.resize(num_channels);
+
+  std::string channel_id[] = { "x", "y", "z"};
+  for (int i = 0; i<num_channels; i++) {
+  	cloud.fields[i].name = channel_id[i];
+  	cloud.fields[i].offset = i * sizeof(float);
+  	cloud.fields[i].count = 1;
+  	cloud.fields[i].datatype = sensor_msgs::PointField::FLOAT32;
+  }
+
+  cloud.data.resize(cloud.row_step * cloud.height);
+
+	unsigned char *cloud_data_ptr = &(cloud.data[0]);
+
+  float data_array[num_channels];
+  for (unsigned int i=0; i<cloud.width; i++) {
+    // if (object_points.at(i)->nObs >= min_observations_per_point_) {
+      data_array[0] = object_points[i].at<float> (2); //x. Do the transformation by just reading at the position of z instead of x
+      data_array[1] = -1.0* object_points[i].at<float>(0); //y. Do the transformation by just reading at the position of x instead of y
+      data_array[2] = -1.0* object_points[i].at<float>(1); //z. Do the transformation by just reading at the position of y instead of z
+      //TODO dont hack the transformation but have a central conversion function for MapPointsToPointCloud and TransformFromMat
+
+      memcpy(cloud_data_ptr+(i*cloud.point_step), data_array, num_channels*sizeof(float));
+    // }
+  }
+
+  object_detections_publisher_.publish(cloud);
+}
+
+void Node::PublishMapPoints (std::vector<ORB_SLAM2::MapPoint*> map_points, std::vector<ORB_SLAM2::MapPoint*> inside_box) {
+  sensor_msgs::PointCloud2 map_cloud = MapPointsToPointCloud (map_points);
+  sensor_msgs::PointCloud2 box_cloud = MapPointsToPointCloud (inside_box);
+  map_points_publisher_.publish (map_cloud);
+  object_points_publisher_.publish (box_cloud);
 }
 
 
@@ -94,7 +153,16 @@ void Node::PublishPositionAsPoseStamped (cv::Mat position) {
 }
 
 
-void Node::PublishRenderedImage (cv::Mat image) {
+void Node::PublishRenderedImage (cv::Mat image, ORB_SLAM2::object_detection_box* object_detection_box) {
+
+  if(object_detection_box != nullptr){
+    int x = object_detection_box->x;
+    int y = object_detection_box->y;
+    int w = object_detection_box->w;
+    int h = object_detection_box->h;
+    cv::rectangle(image, cv::Rect(x-int(w/2), y-int(h/2), w, h), cv::Scalar(0, 165, 255), 2);
+  }
+
   std_msgs::Header header;
   header.stamp = current_frame_time_;
   header.frame_id = map_frame_id_param_;
@@ -139,9 +207,9 @@ tf::Transform Node::TransformFromMat (cv::Mat position_mat) {
 
 
 sensor_msgs::PointCloud2 Node::MapPointsToPointCloud (std::vector<ORB_SLAM2::MapPoint*> map_points) {
-  if (map_points.size() == 0) {
-    std::cout << "Map point vector is empty!" << std::endl;
-  }
+  // if (map_points.size() == 0) {
+  //   std::cout << "Map point vector is empty!" << std::endl;
+  // }
 
   sensor_msgs::PointCloud2 cloud;
 

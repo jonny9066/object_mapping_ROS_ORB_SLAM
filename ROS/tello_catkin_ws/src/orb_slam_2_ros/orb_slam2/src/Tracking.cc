@@ -148,6 +148,228 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
 
 }
 
+
+std::vector<MapPoint*> Tracking::GetCurrentObjectCloud(){
+    /*
+    returns all map points together with points inside bounding box only.
+    */
+
+    //  std::cout << "Got box where needed!, \n"
+    //  "x: " << object_detection_box.x << 
+    //  ", y: " << object_detection_box.y << ", w: " 
+    //  << object_detection_box.w << ", h: "
+    //   << object_detection_box.h << ", name: " 
+    //   << object_detection_box.name << std::endl;
+
+
+    vector<MapPoint*> insideBox;
+    vector<cv::KeyPoint>& kpts = mCurrentFrame.mvKeys;
+    if(BOUNDING_BOX_AVAILABLE){
+        int x = object_detection_box.x;
+        int y = object_detection_box.y;
+        int w = object_detection_box.w;
+        int h = object_detection_box.h;
+        int bbox_size_factor = 3; // two for original bounding box; set bigger for smaller box.
+        int top = y+int(h/bbox_size_factor);
+        int bot = y-int(h/bbox_size_factor);
+        int left = x-int(w/bbox_size_factor);
+        int right = x+int(w/bbox_size_factor);
+        for(size_t i = 0; i<kpts.size(); ++i){
+            if(kpts[i].pt.x < left || kpts[i].pt.x > right)
+                continue;
+            if (kpts[i].pt.y < bot || kpts[i].pt.y > top)
+                continue;
+            if (mCurrentFrame.mvpMapPoints[i] != nullptr)
+                insideBox.push_back(mCurrentFrame.mvpMapPoints[i]);
+        }
+
+    }
+
+    return insideBox;
+}
+
+
+ std::vector<cv::Mat> Tracking::GetObjectPoints(){
+
+    vector<MapPoint*>  insideBox = GetCurrentObjectCloud();
+    int BOX_POINT_THRESHOLD = 10;
+    int NUM_POINTS_FROM_BOX = 6;
+    if(insideBox.size() >= BOX_POINT_THRESHOLD){
+        std::cout << std::endl<<"have enough points, try to make bucket."<<std::endl;
+
+        // compute distances of points inside box from camera and sort ascending.
+        cv::Mat camCenter = mCurrentFrame.GetCameraCenter(); 
+        vector<std::pair<double, cv::Mat>> distancePoint;
+        for(MapPoint* mp: insideBox){
+            cv::Mat worldPos = mp->GetWorldPos(); //x,y,z
+            double dist = cv::norm(camCenter - worldPos);
+            // std::cout<<"got distance "<<dist<<endl;
+            distancePoint.push_back(pair<double, cv::Mat>(dist, worldPos));
+        }
+        std::sort(distancePoint.begin(), distancePoint.end(),
+                [](const std::pair<int, cv::Mat> &a, const std::pair<int, cv::Mat> &b) {
+                    return a.first < b.first;
+                });
+
+        // take average of x closest points to camera for an object candidate
+        cv::Mat bucketCandidate(3,1,CV_32F);
+        for(int i = 0; i<NUM_POINTS_FROM_BOX; i++){
+            bucketCandidate += distancePoint[i].second;
+        }
+        bucketCandidate /= NUM_POINTS_FROM_BOX;
+
+        // std::cout<<"got avg pt "<<endl;
+        // for (int i = 0; i < bucketCandidate.rows; ++i) {
+        //     for (int j = 0; j < bucketCandidate.cols; ++j) {
+        //         std::cout << bucketCandidate.at<float>(i, j) << " ";
+        //     }
+        //     std::cout << std::endl;
+        // }
+
+
+        // if no nuckets, create a new one
+        if(candidateBuckets.size()==0){
+            candidateBuckets.push_back(bucketCandidate);
+            candidateScores.push_back(0);
+            return {};
+            
+        }
+
+        // Find clasest bucket in one of candiadates or final buckets
+        double minDist = 100000; //impossible dist
+        int closestIndex;
+        bool closestIsCandidate = false;
+        for(int i = 0; i<objectBuckets.size(); i++){
+            cv::Mat& existingBucket = objectBuckets[i];
+            double newDist = cv::norm(bucketCandidate - existingBucket);
+            if(newDist<minDist){
+                // std::cout<<"candidate dist from bucket: "<<newDist<<std::endl;
+                minDist=newDist;
+                closestIndex = i;
+            } 
+        }
+        for(int i = 0; i<candidateBuckets.size(); i++){
+            cv::Mat& existingBucket = candidateBuckets[i];
+            double newDist = cv::norm(bucketCandidate - existingBucket);
+            if(newDist<minDist){
+                // std::cout<<"candidate dist from bucket: "<<newDist<<std::endl;
+                minDist=newDist;
+                closestIndex = i;
+                closestIsCandidate = true;
+            } 
+        }
+        std::cout<<"distance between candidate and closest existing is: "<<minDist<<std::endl;
+        
+        // if bucket far enough from all objects and candidates, create new bucket.
+        // we keep only x candidates, if too many remove oldest.
+        double BUCKET_CREATE_THRESHOLD = 0.09;
+        int MAX_CANDIDATE_BUCKETS = 3;
+        if(minDist > BUCKET_CREATE_THRESHOLD){
+            std::cout<<"making new bucket."<<std::endl;
+            candidateBuckets.push_front(bucketCandidate);
+            candidateScores.push_front(0);
+            if(candidateBuckets.size()>MAX_CANDIDATE_BUCKETS){
+                candidateBuckets.pop_back();
+                candidateScores.pop_back();
+            }
+            // objectBuckets.push_back(bucketCandidate);
+            // bucketScores.push_back(0);
+        }
+        else{
+            if(closestIsCandidate){
+                std::cout<<"closest is candidate with score "<<candidateScores[closestIndex]<<", now incremented by one."<<std::endl;
+                candidateScores[closestIndex] += 1; //todo make use of
+
+            }
+            else{
+                std::cout<<"closest is not candidate with score "<<bucketScores[closestIndex]<<", now incremented by one."<<std::endl;
+                bucketScores[closestIndex] += 1; //todo make use of
+
+            }
+        }
+        std::cout << std::endl;
+
+    // std::deque<cv::Mat> candidateBuckets;
+    // std::deque<int> candidateScores;
+
+        int BUCKET_WIN_STHRESHOLD = 100;
+        // move candidates with score > x to winning buckets
+        for(int i = 0; i<candidateBuckets.size(); i++){
+            if(candidateScores[i]>BUCKET_WIN_STHRESHOLD){
+                objectBuckets.push_back(candidateBuckets[i]);
+                bucketScores.push_back(candidateScores[i]); // todo useless or keep for debug?
+                candidateBuckets.erase(candidateBuckets.begin()+i);
+                candidateScores.erase(candidateScores.begin()+i);
+                break; // can be one winner at a time
+            }
+        }
+
+        //do pass on candidates
+
+
+        // return only buckets with large scores
+        // vector<cv::Mat> largeScoreBuckets;
+        // for(int i = 0; i<objectBuckets.size();i++){
+        //     if(bucketScores[i]>BUCKET_SCORE_THRESHOLD)
+        //         largeScoreBuckets.push_back(objectBuckets[i]);
+        // }
+
+        // return largeScoreBuckets;
+        return objectBuckets;
+
+    }
+   
+
+
+
+
+
+
+    // vector<MapPoint*> outsideBox;
+    // vector<MapPoint*>& map_pts = mpMap->GetAllMapPoints();
+    
+    // for(MapPoint* mpt: map_pts){
+
+    // }
+
+    //   return mpMap->GetAllMapPoints();
+
+      return objectBuckets;
+}
+
+std::pair<std::vector<int>, std::vector<int>> separatePositiveNegative(const std::vector<int>& input) {
+    std::vector<int> positive;
+    std::vector<int> negative;
+    
+    for (int num : input) {
+        if (num >= 0) {
+            positive.push_back(num);
+        } else {
+            negative.push_back(num);
+        }
+    }
+    
+    return std::make_pair(positive, negative);
+}
+
+
+void Tracking::UpdateBoundingBox(int x, int y, int w, int h, const string& name){
+    object_detection_box.x = x;
+    object_detection_box.y = y;
+    object_detection_box.w = w;
+    object_detection_box.h = h;
+    object_detection_box.name = name;
+    BOUNDING_BOX_AVAILABLE = true;
+}
+
+object_detection_box_struct* Tracking::GetLastBoundingBox()
+{
+    if (BOUNDING_BOX_AVAILABLE)
+        return &object_detection_box;
+    else
+        return nullptr;
+}
+
 void Tracking::SetLocalMapper(LocalMapping *pLocalMapper)
 {
     mpLocalMapper=pLocalMapper;
@@ -1147,6 +1369,8 @@ void Tracking::CreateNewKeyFrame()
     mnLastKeyFrameId = mCurrentFrame.mnId;
     mpLastKeyFrame = pKF;
 }
+
+
 
 void Tracking::SearchLocalPoints()
 {

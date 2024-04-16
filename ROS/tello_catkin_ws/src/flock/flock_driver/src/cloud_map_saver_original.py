@@ -146,7 +146,7 @@ class CloudMapSaver(object):
         # ROS subscriptions
 
         rospy.Subscriber(self.cloud_topic_name, PointCloud2, self.point_cloud_callback)
-        # rospy.Subscriber(self.trigger_topic_name, Empty, self.save_cloud_callback)
+        rospy.Subscriber(self.trigger_topic_name, Empty, self.save_cloud_callback)
         rospy.Subscriber(self.pose_topic_name, PoseStamped, self.pose_callback)
         rospy.Subscriber(self.camera_topic_name, Image, self.img_callback)
 
@@ -261,12 +261,34 @@ class CloudMapSaver(object):
             if len(self.list_of_pure_lines) > 0:
                 x = np.asarray([float(element[0]) for element in self.list_of_pure_lines])
                 y = np.asarray([-float(element[1]) for element in self.list_of_pure_lines])
-                # z = np.asarray([float(element[2]) for element in self.list_of_pure_lines])
+                z = np.asarray([float(element[2]) for element in self.list_of_pure_lines])
+
+            # self.x_min = min(x.min(), self.x_min)
+            # self.x_max = max(x.max(), self.x_max)
+            # self.y_min = min(y.min(), self.x_min)
+            # self.y_max = max(y.max(), self.x_max)
+            # self.z_min = min(z.min(), self.x_min)
+            # self.z_max = max(z.max(), self.x_max)
+
+
 
 
                 a.scatter(y, x, color='red', s=0.2)
+            # a.scatter(self.position.y, self.position.x, color='blue')
+
+            # x_arrow_final = self.position.x + math.cos(self.deg_to_rad(self.orientation_deg.z))*1
+            # y_arrow_final = self.position.y + math.sin(self.deg_to_rad(self.orientation_deg.z))*1
+
+            # x_arrow_initial = self.position.x - math.cos(self.deg_to_rad(self.orientation_deg.z))*1
+            # y_arrow_initial = self.position.y - math.sin(self.deg_to_rad(self.orientation_deg.z))*1
+
+            # a.plot([y_arrow_initial, y_arrow_final], [x_arrow_initial, x_arrow_final], color='blue')
+
+            # a.arrow(self.position.y, self.position.x, math.sin(self.deg_to_rad(self.orientation_deg.z))/2, math.cos(self.deg_to_rad(self.orientation_deg.z))/2, 
+            #     color='blue', head_width=0.01)
 
                 # we want to look at the X-Y plane. so we want to replace the x and y.
+
                 a.arrow(-self.position.y, self.position.x, math.sin(self.deg_to_rad(-self.orientation_deg.z))/5, math.cos(self.deg_to_rad(-self.orientation_deg.z))/5, 
                     color='blue')
 
@@ -274,13 +296,46 @@ class CloudMapSaver(object):
             # print(e)
             print(traceback.format_exc())
 
-
         a.axis(xmin=self.y_min, xmax=self.y_max)
         a.axis(ymin=self.x_min, ymax=self.x_max)
+        # fig.xlim(self.y_min, self.y_min)
+        # fig.ylim(self.z_min, self.z_min)
+        # a.plot(p, range(2 +max(x)),color='blue')
+        # a.invert_yaxis()
 
         a.set_title ("X-Y", fontsize=16)
         a.set_ylabel("X", fontsize=14)
         a.set_xlabel("Y", fontsize=14)
+
+
+
+        try:
+            if len(self.list_of_pure_lines2) > 0:
+
+                x = np.asarray([float(element[0]) for element in self.list_of_pure_lines2])
+                y = np.asarray([float(element[1]) for element in self.list_of_pure_lines2])
+                z = np.asarray([float(element[2]) for element in self.list_of_pure_lines2])
+
+            # fig = Figure(figsize=(5,5))
+            # a = fig.add_subplot(111)
+                a.scatter(x, z, color='green', s=0.2)
+        except Exception as e:
+            print(e)
+
+        # a.arrow(-self.position.y, self.position.x, math.sin(self.deg_to_rad(-self.orientation_deg.z))/5, math.cos(self.deg_to_rad(-self.orientation_deg.z))/5, 
+        #     color='blue')
+
+        # a.axis(xmin=self.z_min, xmax=self.z_max)
+        # a.axis(ymin=self.x_min, ymax=self.x_max)
+        # # fig.xlim(self.y_min, self.y_min)
+        # # fig.ylim(self.z_min, self.z_min)
+        # # a.plot(p, range(2 +max(x)),color='blue')
+        # # a.invert_yaxis()
+
+        # a.set_title ("X-Z", fontsize=16)
+        # a.set_ylabel("Z", fontsize=14)
+        # a.set_xlabel("X", fontsize=14)
+
 
         canvas = FigureCanvasTkAgg(fig, master=self.root)
         canvas.get_tk_widget().grid(row=1, column=1)
@@ -361,9 +416,6 @@ class CloudMapSaver(object):
         return struct.unpack('f', bytes_list)[0]
 
     def point_cloud_callback(self, point_cloud):
-        '''
-        converts point cloud to list of points in format [x,y,z]
-        '''
         fields_str = str(point_cloud.fields)
         # file.write(fields_str+'\n')
 
@@ -396,40 +448,39 @@ class CloudMapSaver(object):
 
         self.plot_to_gui()
 
-        # if self.once:
-        #     # write the points to file
-        #     rospy.loginfo("Saving Point Cloud from topic {} to file {}".format(self.cloud_topic_name, self.file_path))
-        #     with open(self.file_path, 'w') as file:
-        #         [file.write(','.join(element)+'\n') for element in self.list_of_pure_lines]
+        if self.once:
+            # write the points to file
+            rospy.loginfo("Saving Point Cloud from topic {} to file {}".format(self.cloud_topic_name, self.file_path))
+            with open(self.file_path, 'w') as file:
+                [file.write(','.join(element)+'\n') for element in self.list_of_pure_lines]
 
 
+    def point_cloud_server1_callback(self, point_cloud):
+        fields_str = str(point_cloud.fields)
+        # file.write(fields_str+'\n')
 
-    # def point_cloud_server1_callback(self, point_cloud):
-    #     fields_str = str(point_cloud.fields)
-    #     # file.write(fields_str+'\n')
+        # point_cloud.data is list of uint8[].
+        # every 4 elements, is one float32
+        # convert cloud.data to list where each element in a 4 byte list
+        list_of_4_bytes = [point_cloud.data[x:x+4] for x in range(0, len(point_cloud.data), 4)]
+        # convert every 4 bytes to a float32
+        list_of_floats = [self.float_from_4_bytes(element) for element in list_of_4_bytes]
+        # convert every float to string, and make sure there are only 4 zeros after the point (anti float32....)
+        list_of_strings = ['%.4f' % element for element in list_of_floats]
+        # print(list_of_strings)
 
-    #     # point_cloud.data is list of uint8[].
-    #     # every 4 elements, is one float32
-    #     # convert cloud.data to list where each element in a 4 byte list
-    #     list_of_4_bytes = [point_cloud.data[x:x+4] for x in range(0, len(point_cloud.data), 4)]
-    #     # convert every 4 bytes to a float32
-    #     list_of_floats = [self.float_from_4_bytes(element) for element in list_of_4_bytes]
-    #     # convert every float to string, and make sure there are only 4 zeros after the point (anti float32....)
-    #     list_of_strings = ['%.4f' % element for element in list_of_floats]
-    #     # print(list_of_strings)
+        # check if we are in orbslam mode or ccm_slam mode - there is difference in the structure of point_cloud.fields
+        ccm_slam_mode = 'rgb' in fields_str
 
-    #     # check if we are in orbslam mode or ccm_slam mode - there is difference in the structure of point_cloud.fields
-    #     ccm_slam_mode = 'rgb' in fields_str
+        # in ccmslam: [X, Y, Z, RGB]
+        # in orbslam: [X, Y, Z]
+        # so in ccmslam drop RGB
+        list_of_lines = [list_of_strings[x:x+3] for x in range(0, len(list_of_strings), 3+ccm_slam_mode)]
 
-    #     # in ccmslam: [X, Y, Z, RGB]
-    #     # in orbslam: [X, Y, Z]
-    #     # so in ccmslam drop RGB
-    #     list_of_lines = [list_of_strings[x:x+3] for x in range(0, len(list_of_strings), 3+ccm_slam_mode)]
+        # remove lines that are all zeros
+        self.list_of_pure_lines2 = [element for element in list_of_lines if not element == ['0.0000', '0.0000', '0.0000']]
 
-    #     # remove lines that are all zeros
-    #     self.list_of_pure_lines2 = [element for element in list_of_lines if not element == ['0.0000', '0.0000', '0.0000']]
-
-    #     # self.plot_to_gui()
+        # self.plot_to_gui()
 
 
 
