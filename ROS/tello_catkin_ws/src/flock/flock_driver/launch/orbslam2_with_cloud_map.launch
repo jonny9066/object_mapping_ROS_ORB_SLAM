@@ -27,15 +27,17 @@
 
   <node type="rviz" name="rviz" pkg="rviz" args="-d $(find orb_slam2_ros)/ros/config/rviz_config.rviz" />
   
-  <!-- <node name="cloud_map_saver" pkg="flock_driver" type="cloud_map_saver.py" output="screen">
+  <node name="cloud_map_saver" pkg="flock_driver" type="cloud_map_saver.py" output="screen">
     <param name="OUT_FILE_PATH" type="string" value="/home/arkadiros/map_point.txt" />
-    <param name="CLOUD_TOPIC_NAME" type="string" value="/orb_slam2_mono/map_points" />
-    <param name="CLOUD_TOPIC_NAME" type="string" value="/orb_slam2_mono/object_points" />
+    <param name="CLOUD_TOPIC_NAME" type="string" value="/orb_slam2_mono/object_detections" />
     <param name="TRIGGER_TOPIC_NAME" type="string" value="/save_cloud_trigger" />
     <param name="POSE_TOPIC_NAME" type="string" value="/orb_slam2_mono/pose" />
     <param name="CAMERA_TOPIC_NAME" type="string" value="/orb_slam2_mono/debug_image" />
-  </node> -->
+  </node>
 
+<!-- add below line to display all object points in python viewer -->
+    <!-- <param name="CLOUD_TOPIC_NAME" type="string" value="/orb_slam2_mono/map_points" /> -->
+    <!-- <param name="CLOUD_TOPIC_NAME" type="string" value="/orb_slam2_mono/object_points" /> -->
 
 
   <!-- <node name="image_muxer" pkg="flock_driver" type="image_muxer.py" output="screen" /> -->

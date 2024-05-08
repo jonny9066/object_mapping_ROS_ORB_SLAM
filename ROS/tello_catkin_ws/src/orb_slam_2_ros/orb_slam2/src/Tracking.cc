@@ -149,9 +149,108 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
 }
 
 
-std::vector<MapPoint*> Tracking::GetCurrentObjectCloud(){
+////////// START OBJECT RELATED CODE
+
+
+void Tracking::computeScaleFromChair(){
+    /*
+    returns double representing scale in CM. If not successful, returns -1.
+    */
+
+    //  std::cout << "Got box where needed!, \n"
+    //  "x: " << object_detection_box.x << 
+    //  ", y: " << object_detection_box.y << ", w: " 
+    //  << object_detection_box.w << ", h: "
+    //   << object_detection_box.h << ", name: " 
+    //   << object_detection_box.name << std::endl;
+    double REAL_WORLD_REF_DISTANCE_CM = 50;
+
+    vector<cv::KeyPoint>& kpts = mCurrentFrame.mvKeys;
+
+    // check for boudning boxperfromed in calling function.
+    int x = object_detection_box.x;
+    int y = object_detection_box.y;
+    int w = object_detection_box.w;
+    int h = object_detection_box.h;
+
+    int top = y+int(h/2);
+    int bot = y-int(h/2);
+    int left = x-int(w/2);
+    int right = x+int(w/2);
+
+    cv::Point2f leftLeg(left, top);
+    cv::Point2f rightLeg(right, top);
+
+
+    vector<cv::Mat> leftLegWorldPoints;
+    vector<cv::Mat> rightLegWorldPoints;
+    //for debug drawing
+    vector<cv::Point2f> leftLeg2DPoints;
+    vector<cv::Point2f> rightLeg2DPoints;
+    double distToBelongToLeg = double(h)/7;
+    // choose keypoints from inside bounding box depending on closeness to chair leg (corner)
+    for(size_t i = 0; i<kpts.size(); ++i){
+        if (mCurrentFrame.mvpMapPoints[i] == nullptr)
+            continue;
+        // check if inside boudning box
+        if(kpts[i].pt.x < left || kpts[i].pt.x > right)
+            continue;
+        if (kpts[i].pt.y < bot || kpts[i].pt.y > top)
+            continue;
+        // check distance from each leg
+        double distLeft = cv::norm(leftLeg - kpts[i].pt);
+        double distRight = cv::norm(rightLeg - kpts[i].pt);
+
+        // get all points that are close enough to each corner
+        //should not occur simultaneously
+        if(distLeft < distToBelongToLeg){
+                leftLegWorldPoints.push_back(mCurrentFrame.mvpMapPoints[i]->GetWorldPos()); 
+                leftLeg2DPoints.push_back(kpts[i].pt);
+        }
+
+        if(distRight < distToBelongToLeg){
+                rightLegWorldPoints.push_back(mCurrentFrame.mvpMapPoints[i]->GetWorldPos()); 
+                rightLeg2DPoints.push_back(kpts[i].pt);
+        }
+    }
+
+    // check if enough points
+    int MIN_POINTS_FOR_RES = 3;
+    int minMatchesOfLegs = std::min(leftLegWorldPoints.size(),rightLegWorldPoints.size());
+    if(minMatchesOfLegs<MIN_POINTS_FOR_RES) return;
+
+
+    // compute average from points, which will represnet each chair leg.
+    cv::Point2f left2DAvg(0, 0);
+    cv::Point2f right2DAvg(0, 0);
+    cv::Mat leftAvg(3,1,CV_32F);
+    cv::Mat rightAvg(3,1,CV_32F);
+    for(int i = 0; i<minMatchesOfLegs; i++){
+        leftAvg += leftLegWorldPoints[i];
+        rightAvg += rightLegWorldPoints[i];
+        left2DAvg += leftLeg2DPoints[i];
+        right2DAvg += rightLeg2DPoints[i];
+    }
+    leftAvg /= minMatchesOfLegs;
+    rightAvg /= minMatchesOfLegs;
+    left2DAvg /= minMatchesOfLegs;
+    right2DAvg /= minMatchesOfLegs;
+
+    double scale = REAL_WORLD_REF_DISTANCE_CM/cv::norm(leftAvg, rightAvg);
+    cout<<"distance in arbitrary units is"<<cv::norm(leftAvg, rightAvg)<<endl;
+    cout<<"got proposed scale "<<scale<<endl;
+    // scaleFromObject = scale;
+    scaleFromThesePoints = {left2DAvg, right2DAvg};
+    proposedScaleFactors.push_back(scale);
+
+}
+
+//called iwth every new frame.
+std::vector<MapPoint*> Tracking::GetCurrentObjectCloud(int bbox_x_factor, int bbox_y_factor){
+
     /*
     returns all map points together with points inside bounding box only.
+    @param int bbox_size_factor two for original bounding box; set bigger for smaller box.
     */
 
     //  std::cout << "Got box where needed!, \n"
@@ -161,6 +260,11 @@ std::vector<MapPoint*> Tracking::GetCurrentObjectCloud(){
     //   << object_detection_box.h << ", name: " 
     //   << object_detection_box.name << std::endl;
 
+    intervalCounter ++;
+    if(mState==NOT_INITIALIZED) {
+        if(intervalCounter %100 == 0) cout<<"not returning object cloud because orbslam not initialized"<<endl;
+        return {};
+    }
 
     vector<MapPoint*> insideBox;
     vector<cv::KeyPoint>& kpts = mCurrentFrame.mvKeys;
@@ -169,11 +273,10 @@ std::vector<MapPoint*> Tracking::GetCurrentObjectCloud(){
         int y = object_detection_box.y;
         int w = object_detection_box.w;
         int h = object_detection_box.h;
-        int bbox_size_factor = 3; // two for original bounding box; set bigger for smaller box.
-        int top = y+int(h/bbox_size_factor);
-        int bot = y-int(h/bbox_size_factor);
-        int left = x-int(w/bbox_size_factor);
-        int right = x+int(w/bbox_size_factor);
+        int top = y+int(h/bbox_y_factor);
+        int bot = y-int(h/bbox_y_factor);
+        int left = x-int(w/bbox_x_factor);
+        int right = x+int(w/bbox_x_factor);
         for(size_t i = 0; i<kpts.size(); ++i){
             if(kpts[i].pt.x < left || kpts[i].pt.x > right)
                 continue;
@@ -183,143 +286,293 @@ std::vector<MapPoint*> Tracking::GetCurrentObjectCloud(){
                 insideBox.push_back(mCurrentFrame.mvpMapPoints[i]);
         }
 
+        // get enough scale samples and take median
+        int REQUIRED_NUM_SAMPLES = 100;
+        if(proposedScaleFactors.size() < REQUIRED_NUM_SAMPLES){
+            computeScaleFromChair();
+            if (proposedScaleFactors.size() == REQUIRED_NUM_SAMPLES){
+                sort(proposedScaleFactors.begin(),proposedScaleFactors.end());
+                scaleFromObject = proposedScaleFactors[REQUIRED_NUM_SAMPLES/2];
+                cout<<"got final scale "<<scaleFromObject<<endl;
+            }
+        }
+
     }
+    
 
     return insideBox;
 }
 
+cv::Mat computeCenterFromCloud(std::vector<MapPoint*> cloud){
+    cv::Mat avg(3,1,CV_32F);
+    for(int i = 0; i<cloud.size(); i++){
+        if(cloud[i] == nullptr){
+            cout<< "have null point inside object!! Not computing its center"<<endl;
+            return avg;
+        }
+        avg += cloud[i]->GetWorldPos();
+    }
+    avg /= cloud.size();
+    return avg;
+}
 
- std::vector<cv::Mat> Tracking::GetObjectPoints(){
 
-    vector<MapPoint*>  insideBox = GetCurrentObjectCloud();
-    int BOX_POINT_THRESHOLD = 10;
+std::vector<cv::Mat> Tracking::GetObjectPoints(){
+    // cout<<"entered GetObjectPoints"<<endl;
+    // cout<<"size of detectedObjects is "<<detectedObjects.size()<<endl;
+
+    // compute a point for every object from its cloud.
+    // do this first bacause may be useful below
+    std::vector<cv::Mat> detectedObjectCenters;
+    for(std::vector<MapPoint*> object: detectedObjects){
+        detectedObjectCenters.push_back(computeCenterFromCloud(object));
+    }
+
+
+    vector<MapPoint*>  insideBox = GetCurrentObjectCloud(2.5,3);
+    int BOX_POINT_THRESHOLD = 9;
     int NUM_POINTS_FROM_BOX = 6;
-    if(insideBox.size() >= BOX_POINT_THRESHOLD){
-        std::cout << std::endl<<"have enough points, try to make bucket."<<std::endl;
-
-        // compute distances of points inside box from camera and sort ascending.
-        cv::Mat camCenter = mCurrentFrame.GetCameraCenter(); 
-        vector<std::pair<double, cv::Mat>> distancePoint;
-        for(MapPoint* mp: insideBox){
-            cv::Mat worldPos = mp->GetWorldPos(); //x,y,z
-            double dist = cv::norm(camCenter - worldPos);
-            // std::cout<<"got distance "<<dist<<endl;
-            distancePoint.push_back(pair<double, cv::Mat>(dist, worldPos));
-        }
-        std::sort(distancePoint.begin(), distancePoint.end(),
-                [](const std::pair<int, cv::Mat> &a, const std::pair<int, cv::Mat> &b) {
-                    return a.first < b.first;
-                });
-
-        // take average of x closest points to camera for an object candidate
-        cv::Mat bucketCandidate(3,1,CV_32F);
-        for(int i = 0; i<NUM_POINTS_FROM_BOX; i++){
-            bucketCandidate += distancePoint[i].second;
-        }
-        bucketCandidate /= NUM_POINTS_FROM_BOX;
+    // make sure we have scale and enough detected 3D points
+    if(insideBox.size() >= BOX_POINT_THRESHOLD && scaleFromObject != -1){
+        // std::cout << std::endl<<"have enough points, try to make candidate."<<std::endl;
 
         // std::cout<<"got avg pt "<<endl;
-        // for (int i = 0; i < bucketCandidate.rows; ++i) {
-        //     for (int j = 0; j < bucketCandidate.cols; ++j) {
-        //         std::cout << bucketCandidate.at<float>(i, j) << " ";
+        // for (int i = 0; i < objectCandidate.rows; ++i) {
+        //     for (int j = 0; j < objectCandidate.cols; ++j) {
+        //         std::cout << objectCandidate.at<float>(i, j) << " ";
         //     }
         //     std::cout << std::endl;
         // }
 
-
-        // if no nuckets, create a new one
-        if(candidateBuckets.size()==0){
-            candidateBuckets.push_back(bucketCandidate);
-            candidateScores.push_back(0);
-            return {};
-            
-        }
-
-        // Find clasest bucket in one of candiadates or final buckets
-        double minDist = 100000; //impossible dist
-        int closestIndex;
-        bool closestIsCandidate = false;
-        for(int i = 0; i<objectBuckets.size(); i++){
-            cv::Mat& existingBucket = objectBuckets[i];
-            double newDist = cv::norm(bucketCandidate - existingBucket);
-            if(newDist<minDist){
-                // std::cout<<"candidate dist from bucket: "<<newDist<<std::endl;
-                minDist=newDist;
-                closestIndex = i;
-            } 
-        }
-        for(int i = 0; i<candidateBuckets.size(); i++){
-            cv::Mat& existingBucket = candidateBuckets[i];
-            double newDist = cv::norm(bucketCandidate - existingBucket);
-            if(newDist<minDist){
-                // std::cout<<"candidate dist from bucket: "<<newDist<<std::endl;
-                minDist=newDist;
-                closestIndex = i;
-                closestIsCandidate = true;
-            } 
-        }
-        std::cout<<"distance between candidate and closest existing is: "<<minDist<<std::endl;
         
-        // if bucket far enough from all objects and candidates, create new bucket.
-        // we keep only x candidates, if too many remove oldest.
-        double BUCKET_CREATE_THRESHOLD = 0.09;
-        int MAX_CANDIDATE_BUCKETS = 3;
-        if(minDist > BUCKET_CREATE_THRESHOLD){
-            std::cout<<"making new bucket."<<std::endl;
-            candidateBuckets.push_front(bucketCandidate);
-            candidateScores.push_front(0);
-            if(candidateBuckets.size()>MAX_CANDIDATE_BUCKETS){
-                candidateBuckets.pop_back();
-                candidateScores.pop_back();
-            }
-            // objectBuckets.push_back(bucketCandidate);
-            // bucketScores.push_back(0);
+        ////// refine point cloud by removing few closes and furthest points from camera
+        ////// result is a cloud that will represent the object
+        // compute distances of points inside box from camera and sort ascending.
+        cv::Mat camCenter = mCurrentFrame.GetCameraCenter(); 
+        vector<std::pair<double, MapPoint*>> distancePoint;
+        for(MapPoint* mp: insideBox){
+            cv::Mat worldPos = mp->GetWorldPos(); //x,y,z
+            double dist = cv::norm(camCenter - worldPos);
+            // std::cout<<"got distance "<<dist<<endl;
+            distancePoint.push_back(pair<double, MapPoint*>(dist, mp));
         }
+        std::sort(distancePoint.begin(), distancePoint.end(),
+            [](const std::pair<int, MapPoint*> &a, const std::pair<int, MapPoint*> &b) {
+                return a.first < b.first;
+            });
+
+        // try to avoid outliers by removing few last and first points
+        std::vector<MapPoint*> objectCandidate;
+        // cv::Mat candidateCenter(3,1,CV_32F);
+        for(int i = 1; i<NUM_POINTS_FROM_BOX+1; i++){
+            objectCandidate.push_back(distancePoint[i].second);
+        }
+        cv::Mat candidateCenter = computeCenterFromCloud(objectCandidate);
+
+
+
+        // if no candidate, create new and return
+        if(canidateScore == -1){
+            // cout<<"creating new candidate"<<endl;
+            lastObjectCandidate = objectCandidate;
+            canidateScore = 0;
+            return detectedObjectCenters;
+        }
+        
+        ////// if have point considered to be added, check if it's close enough to last one
+        ////// if it is, a score will be incremented. Otherwise, the new point will become a candidate
+
+
+        int DIST_THRESOLD_CM = 40; 
+        // lastObjectCandidate is the point currently considered to be made a detection
+        cv::Mat lastCandidateCenter = computeCenterFromCloud(lastObjectCandidate);
+        double distanceFromLastCandidate = getDistInCM(cv::norm(candidateCenter - lastCandidateCenter));
+        // if far enough, current object becomes the candidate
+        if(distanceFromLastCandidate > DIST_THRESOLD_CM){
+
+            // cout<<"existing candidate too far, making new one. distanceFromLastCandidate = "<<distanceFromLastCandidate<<endl;
+            lastObjectCandidate = objectCandidate;
+            canidateScore = 0;
+        }
+        // if close enough, add to score and possibly make new object. Use last candidate points for new object
         else{
-            if(closestIsCandidate){
-                std::cout<<"closest is candidate with score "<<candidateScores[closestIndex]<<", now incremented by one."<<std::endl;
-                candidateScores[closestIndex] += 1; //todo make use of
+            // cout<<"existing close enough. distanceFromLastCandidate = "<<distanceFromLastCandidate<<endl;
+            canidateScore +=1;
+            int DETECTION_SCORE_THRESHOLD = 5;
+            // if score high enough, try adding an object
+            if(canidateScore == DETECTION_SCORE_THRESHOLD){
+            // cout<<"trying to add new object from candidate with score ."<< canidateScore<<endl;
+                canidateScore = -1; // mark as no candidate
+                // compute distance to closest object 
+                double minDist = 1000000;
+                int closestObjectIndex = -1;
+                for(int i = 0; i< detectedObjectCenters.size();i++){//cv::Mat objectPt : detectedObjectCenters){
+                    double newDist = getDistInCM(cv::norm(candidateCenter - detectedObjectCenters[i]));
+                    if(newDist<minDist){
+                        minDist=newDist;
+                        closestObjectIndex = i;
+                    } 
+                }
+                // if closest object is far enough = no collision, add new object, and add its center to result
+                if(minDist > DIST_THRESOLD_CM){
+                    cout<<"Creating new object.";
+                    if(closestObjectIndex != -1) cout<<" Closest object="<<closestObjectIndex+1<<" is "<<minDist<<"cm away."<<endl;
+                    else cout<<endl;
 
-            }
-            else{
-                std::cout<<"closest is not candidate with score "<<bucketScores[closestIndex]<<", now incremented by one."<<std::endl;
-                bucketScores[closestIndex] += 1; //todo make use of
+                    detectedObjects.push_back(objectCandidate);
+                    detectedObjectCenters.push_back(candidateCenter);
 
+                    // print distances between 1-2, 2-3, etc.
+                    if(detectedObjectCenters.size()>1){
+                        cout<<"distances between objects are"<<endl;
+                        for(int i = 0; i< detectedObjectCenters.size()-1;i++){//cv::Mat objectPt : detectedObjectCenters){
+                            double d = getDistInCM(cv::norm(detectedObjectCenters[i] - detectedObjectCenters[i+1]));
+                            cout<<i+1<<" and "<<i+2<<": "<<d<<endl;
+                        }
+                    }
+                //otherwise update location of colliding object
+                }else{
+                    detectedObjects[closestObjectIndex] = objectCandidate;
+                    detectedObjectCenters[closestObjectIndex] = candidateCenter;
+                    // cout<<"Candidate is identified as object number ="<<closestObjectIndex+1<<" which is "<<minDist<<"cm away. Not adding object."<<endl;
+                }
             }
         }
-        std::cout << std::endl;
-
-    // std::deque<cv::Mat> candidateBuckets;
-    // std::deque<int> candidateScores;
-
-        int BUCKET_WIN_STHRESHOLD = 100;
-        // move candidates with score > x to winning buckets
-        for(int i = 0; i<candidateBuckets.size(); i++){
-            if(candidateScores[i]>BUCKET_WIN_STHRESHOLD){
-                objectBuckets.push_back(candidateBuckets[i]);
-                bucketScores.push_back(candidateScores[i]); // todo useless or keep for debug?
-                candidateBuckets.erase(candidateBuckets.begin()+i);
-                candidateScores.erase(candidateScores.begin()+i);
-                break; // can be one winner at a time
-            }
-        }
-
-        //do pass on candidates
-
-
-        // return only buckets with large scores
-        // vector<cv::Mat> largeScoreBuckets;
-        // for(int i = 0; i<objectBuckets.size();i++){
-        //     if(bucketScores[i]>BUCKET_SCORE_THRESHOLD)
-        //         largeScoreBuckets.push_back(objectBuckets[i]);
-        // }
-
-        // return largeScoreBuckets;
-        return objectBuckets;
-
     }
-   
+    return detectedObjectCenters;
+}
 
+
+/////////COPIED BEFORE CHANGES
+//  std::vector<cv::Mat> Tracking::GetObjectPoints(){
+
+//     vector<MapPoint*>  insideBox = GetCurrentObjectCloud();
+//     int BOX_POINT_THRESHOLD = 10;
+//     int NUM_POINTS_FROM_BOX = 6;
+//     if(insideBox.size() >= BOX_POINT_THRESHOLD){
+//         std::cout << std::endl<<"have enough points, try to make bucket."<<std::endl;
+
+//         // compute distances of points inside box from camera and sort ascending.
+//         cv::Mat camCenter = mCurrentFrame.GetCameraCenter(); 
+//         vector<std::pair<double, cv::Mat>> distancePoint;
+//         for(MapPoint* mp: insideBox){
+//             cv::Mat worldPos = mp->GetWorldPos(); //x,y,z
+//             double dist = cv::norm(camCenter - worldPos);
+//             // std::cout<<"got distance "<<dist<<endl;
+//             distancePoint.push_back(pair<double, cv::Mat>(dist, worldPos));
+//         }
+//         std::sort(distancePoint.begin(), distancePoint.end(),
+//                 [](const std::pair<int, cv::Mat> &a, const std::pair<int, cv::Mat> &b) {
+//                     return a.first < b.first;
+//                 });
+
+//         // take average of x closest points to camera for an object candidate
+//         cv::Mat bucketCandidate(3,1,CV_32F);
+//         for(int i = 0; i<NUM_POINTS_FROM_BOX; i++){
+//             bucketCandidate += distancePoint[i].second;
+//         }
+//         bucketCandidate /= NUM_POINTS_FROM_BOX;
+
+//         // std::cout<<"got avg pt "<<endl;
+//         // for (int i = 0; i < bucketCandidate.rows; ++i) {
+//         //     for (int j = 0; j < bucketCandidate.cols; ++j) {
+//         //         std::cout << bucketCandidate.at<float>(i, j) << " ";
+//         //     }
+//         //     std::cout << std::endl;
+//         // }
+
+
+//         // if no nuckets, create a new one
+//         if(candidateBuckets.size()==0){
+//             candidateBuckets.push_back(bucketCandidate);
+//             candidateScores.push_back(0);
+//             return {};
+            
+//         }
+
+//         // Find clasest bucket in one of candiadates or final buckets
+//         double minDist = 100000; //impossible dist
+//         int closestIndex;
+//         bool closestIsCandidate = false;
+//         for(int i = 0; i<objectBuckets.size(); i++){
+//             cv::Mat& existingBucket = objectBuckets[i];
+//             double newDist = cv::norm(bucketCandidate - existingBucket);
+//             if(newDist<minDist){
+//                 // std::cout<<"candidate dist from bucket: "<<newDist<<std::endl;
+//                 minDist=newDist;
+//                 closestIndex = i;
+//             } 
+//         }
+//         for(int i = 0; i<candidateBuckets.size(); i++){
+//             cv::Mat& existingBucket = candidateBuckets[i];
+//             double newDist = cv::norm(bucketCandidate - existingBucket);
+//             if(newDist<minDist){
+//                 // std::cout<<"candidate dist from bucket: "<<newDist<<std::endl;
+//                 minDist=newDist;
+//                 closestIndex = i;
+//                 closestIsCandidate = true;
+//             } 
+//         }
+//         std::cout<<"distance between candidate and closest existing is: "<<minDist<<std::endl;
+        
+//         // if bucket far enough from all objects and candidates, create new bucket.
+//         // we keep only x candidates, if too many remove oldest.
+//         double BUCKET_CREATE_THRESHOLD = 0.09;
+//         int MAX_CANDIDATE_BUCKETS = 3;
+//         if(minDist > BUCKET_CREATE_THRESHOLD){
+//             std::cout<<"making new bucket."<<std::endl;
+//             candidateBuckets.push_front(bucketCandidate);
+//             candidateScores.push_front(0);
+//             if(candidateBuckets.size()>MAX_CANDIDATE_BUCKETS){
+//                 candidateBuckets.pop_back();
+//                 candidateScores.pop_back();
+//             }
+//             // objectBuckets.push_back(bucketCandidate);
+//             // bucketScores.push_back(0);
+//         }
+//         else{
+//             if(closestIsCandidate){
+//                 std::cout<<"closest is candidate with score "<<candidateScores[closestIndex]<<", now incremented by one."<<std::endl;
+//                 candidateScores[closestIndex] += 1; //todo make use of
+
+//             }
+//             else{
+//                 std::cout<<"closest is not candidate with score "<<bucketScores[closestIndex]<<", now incremented by one."<<std::endl;
+//                 bucketScores[closestIndex] += 1; //todo make use of
+
+//             }
+//         }
+//         std::cout << std::endl;
+
+//     // std::deque<cv::Mat> candidateBuckets;
+//     // std::deque<int> candidateScores;
+
+//         int BUCKET_WIN_STHRESHOLD = 20;
+//         // move candidates with score > x to winning buckets
+//         for(int i = 0; i<candidateBuckets.size(); i++){
+//             if(candidateScores[i]>BUCKET_WIN_STHRESHOLD){
+//                 objectBuckets.push_back(candidateBuckets[i]);
+//                 bucketScores.push_back(candidateScores[i]); // todo useless or keep for debug?
+//                 candidateBuckets.erase(candidateBuckets.begin()+i);
+//                 candidateScores.erase(candidateScores.begin()+i);
+//                 break; // can be one winner at a time
+//             }
+//         }
+
+//         //do pass on candidates
+
+
+//         // return only buckets with large scores
+//         // vector<cv::Mat> largeScoreBuckets;
+//         // for(int i = 0; i<objectBuckets.size();i++){
+//         //     if(bucketScores[i]>BUCKET_SCORE_THRESHOLD)
+//         //         largeScoreBuckets.push_back(objectBuckets[i]);
+//         // }
+
+//         // return largeScoreBuckets;
+//         return objectBuckets;
+
+//     }
 
 
 
@@ -334,23 +587,23 @@ std::vector<MapPoint*> Tracking::GetCurrentObjectCloud(){
 
     //   return mpMap->GetAllMapPoints();
 
-      return objectBuckets;
-}
+//       return objectBuckets;
+// }
 
-std::pair<std::vector<int>, std::vector<int>> separatePositiveNegative(const std::vector<int>& input) {
-    std::vector<int> positive;
-    std::vector<int> negative;
+// std::pair<std::vector<int>, std::vector<int>> separatePositiveNegative(const std::vector<int>& input) {
+//     std::vector<int> positive;
+//     std::vector<int> negative;
     
-    for (int num : input) {
-        if (num >= 0) {
-            positive.push_back(num);
-        } else {
-            negative.push_back(num);
-        }
-    }
+//     for (int num : input) {
+//         if (num >= 0) {
+//             positive.push_back(num);
+//         } else {
+//             negative.push_back(num);
+//         }
+//     }
     
-    return std::make_pair(positive, negative);
-}
+//     return std::make_pair(positive, negative);
+// }
 
 
 void Tracking::UpdateBoundingBox(int x, int y, int w, int h, const string& name){
@@ -369,6 +622,10 @@ object_detection_box_struct* Tracking::GetLastBoundingBox()
     else
         return nullptr;
 }
+
+
+
+////////// END OBJECT RELATED CODE
 
 void Tracking::SetLocalMapper(LocalMapping *pLocalMapper)
 {

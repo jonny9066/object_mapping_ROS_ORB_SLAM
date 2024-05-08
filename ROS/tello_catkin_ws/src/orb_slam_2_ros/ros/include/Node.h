@@ -63,7 +63,7 @@ class Node
     void PublishObjectDetections (std::vector<cv::Mat> object_points) ;
     void PublishPositionAsTransform (cv::Mat position);
     void PublishPositionAsPoseStamped(cv::Mat position);
-    void PublishRenderedImage (cv::Mat image, ORB_SLAM2::object_detection_box*);
+    void PublishRenderedImage (); 
     void ParamsChangedCallback(orb_slam2_ros::dynamic_reconfigureConfig &config, uint32_t level);
     bool SaveMapSrv (orb_slam2_ros::SaveMap::Request &req, orb_slam2_ros::SaveMap::Response &res);
 

@@ -65,6 +65,8 @@ protected:
     Map* mpMap;
 
     std::mutex mMutex;
+
+    Tracking *mpTracker; // yoni: adde for convenience to not copy all variables, yes it's ugly.
 };
 
 } //namespace ORB_SLAM

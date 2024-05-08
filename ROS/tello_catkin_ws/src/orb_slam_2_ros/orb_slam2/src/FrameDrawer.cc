@@ -35,6 +35,8 @@ FrameDrawer::FrameDrawer(Map* pMap):mpMap(pMap)
     mIm = cv::Mat(480,640,CV_8UC3, cv::Scalar(0,0,0));
 }
 
+
+
 cv::Mat FrameDrawer::DrawFrame()
 {
     cv::Mat im;
@@ -118,6 +120,24 @@ cv::Mat FrameDrawer::DrawFrame()
             }
         }
     }
+    // if (!= nullptr){ // prob not needed
+    object_detection_box* object_detection_box = mpTracker->GetLastBoundingBox();
+
+    if(object_detection_box != nullptr){
+        int x = object_detection_box->x;
+        int y = object_detection_box->y;
+        int w = object_detection_box->w;
+        int h = object_detection_box->h;
+        cv::rectangle(im, cv::Rect(x-int(w/2), y-int(h/2), w, h), cv::Scalar(0, 165, 255), 2);
+
+        if(mpTracker->scaleFromThesePoints.size()==2){
+            cv::Point2f lPt = mpTracker->scaleFromThesePoints[0];
+            cv::Point2f rPt = mpTracker->scaleFromThesePoints[1];
+            cv::line(im, lPt, rPt, cv::Scalar(0, 0, 255), 3);
+        }
+    }
+
+    // }
 
     cv::Mat imWithInfo;
     DrawTextInfo(im,state, imWithInfo);
@@ -166,6 +186,7 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
 
 void FrameDrawer::Update(Tracking *pTracker)
 {
+    mpTracker = pTracker; // yoni added
     unique_lock<mutex> lock(mMutex);
     pTracker->mImGray.copyTo(mIm);
     mvCurrentKeys=pTracker->mCurrentFrame.mvKeys;

@@ -39,7 +39,7 @@ class CloudMapSaver(object):
         self.once = False
 
         try: 
-            self.id                = rospy.get_param('~ID')
+            self.id = rospy.get_param('~ID')
         except KeyError:
             self.id = ''
 
@@ -256,23 +256,39 @@ class CloudMapSaver(object):
         fig = Figure(figsize=(5,5))
         a = fig.add_subplot(111)
 
-        try:
 
-            if len(self.list_of_pure_lines) > 0:
-                x = np.asarray([float(element[0]) for element in self.list_of_pure_lines])
-                y = np.asarray([-float(element[1]) for element in self.list_of_pure_lines])
-                # z = np.asarray([float(element[2]) for element in self.list_of_pure_lines])
+        # try:
+
+        #     if len(self.list_of_pure_lines) > 0:
+        #         x = np.asarray([float(element[0]) for element in self.list_of_pure_lines])
+        #         y = np.asarray([-float(element[1]) for element in self.list_of_pure_lines])
+        #         # z = np.asarray([float(element[2]) for element in self.list_of_pure_lines])
 
 
-                a.scatter(y, x, color='red', s=0.2)
+        #         a.scatter(y, x, color='red', s=1)
 
-                # we want to look at the X-Y plane. so we want to replace the x and y.
-                a.arrow(-self.position.y, self.position.x, math.sin(self.deg_to_rad(-self.orientation_deg.z))/5, math.cos(self.deg_to_rad(-self.orientation_deg.z))/5, 
+        #         # we want to look at the X-Y plane. so we want to replace the x and y.
+        #         a.arrow(-self.position.y, self.position.x, math.sin(self.deg_to_rad(-self.orientation_deg.z))/5, math.cos(self.deg_to_rad(-self.orientation_deg.z))/5, 
+        #             color='blue')
+
+        # except Exception as e:
+        #     # print(e)
+        #     print(traceback.format_exc())
+
+        colors = ['blue', 'green', 'red', 'cyan', 'magenta']
+        
+        xs = np.asarray([float(element[0]) for element in self.list_of_pure_lines])
+        ys = np.asarray([-float(element[1]) for element in self.list_of_pure_lines])
+        color_index = 0
+        for x,y, obj_num in zip(xs,ys, range(1,len(xs)+1)):
+            a.text(y, x+0.1, s= str(obj_num),fontsize=12, color=colors[color_index])
+            color_index += 1
+            color_index = color_index%len(colors)
+
+        a.scatter(ys, xs, color='red', s=1)
+        a.arrow(-self.position.y, self.position.x, math.sin(self.deg_to_rad(-self.orientation_deg.z))/5, math.cos(self.deg_to_rad(-self.orientation_deg.z))/5, 
                     color='blue')
-
-        except Exception as e:
-            # print(e)
-            print(traceback.format_exc())
+        
 
 
         a.axis(xmin=self.y_min, xmax=self.y_max)

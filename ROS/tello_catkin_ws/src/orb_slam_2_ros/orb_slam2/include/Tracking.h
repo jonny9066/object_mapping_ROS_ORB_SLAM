@@ -124,10 +124,26 @@ public:
 
     void Reset();
     void UpdateBoundingBox(int x, int y, int w, int h, const string& name);
+
+    // Functions and variables related to object mapping
     // updates object points and then returns them, will be triggered with each new frame
     std::vector<cv::Mat> GetObjectPoints();
-    std::vector<MapPoint*> GetCurrentObjectCloud();
+    std::vector<MapPoint*> GetCurrentObjectCloud(int boxScaleX, int boxScaleY);
+    std::vector<MapPoint*> GetCurrentObjectCloud(){
+        return GetCurrentObjectCloud(2,2); // default window box
+    }
     object_detection_box_struct* GetLastBoundingBox();
+    vector<double> proposedScaleFactors;
+    bool scaleInitFinished = false;
+    void computeScaleFromChair();
+    vector<cv::Point2f> scaleFromThesePoints;
+
+    uint32_t intervalCounter = 0;
+    double getDistInCM(double arbitraryDist){
+        if(scaleFromObject==-1) throw std::runtime_error("trying to convert scale but scale not initialized.");
+        return arbitraryDist*scaleFromObject;
+    }
+    double scaleFromObject = -1;
 
 protected:
 
@@ -202,10 +218,21 @@ protected:
     // object detection
     object_detection_box_struct object_detection_box;
     bool BOUNDING_BOX_AVAILABLE = false;
-    std::vector<cv::Mat> objectBuckets;
-    std::vector<int> bucketScores;
-    std::deque<cv::Mat> candidateBuckets;
-    std::deque<int> candidateScores;
+
+
+    std::vector<MapPoint*> lastObjectCandidate;
+    int canidateScore = -1;
+
+    std::vector<std::vector<MapPoint*>> detectedObjects; // vecotr of map points with which object was detected
+
+
+    ////todo remove later
+    // std::vector<cv::Mat> objectBuckets;
+    // std::vector<int> bucketScores;
+    // std::deque<cv::Mat> candidateBuckets;
+    // std::deque<int> candidateScores;
+
+
     
 
     //Calibration matrix

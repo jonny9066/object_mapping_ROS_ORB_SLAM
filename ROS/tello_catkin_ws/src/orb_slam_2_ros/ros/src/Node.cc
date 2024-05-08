@@ -47,7 +47,7 @@ Node::~Node () {
   orb_slam_->Shutdown();
 
   // Save camera trajectory
-  orb_slam_->SaveKeyFrameTrajectoryTUM("KeyFrameTrajectory.txt");
+  // orb_slam_->SaveKeyFrameTrajectoryTUM("KeyFrameTrajectory.txt");
 
   delete orb_slam_;
 }
@@ -64,7 +64,7 @@ void Node::Update () {
     }
   }
 
-  PublishRenderedImage (orb_slam_->DrawCurrentFrame(), orb_slam_->mpTracker->GetLastBoundingBox());
+  PublishRenderedImage ();
 
   if (publish_pointcloud_param_) {
     // PublishMapPoints (orb_slam_->GetAllMapPoints());
@@ -75,12 +75,12 @@ void Node::Update () {
 
                   //TODO orb_slam_->mpTracker->GetObjectPoints();
 
+    // publish both map and object points, each in separate topic
     PublishMapPoints (orb_slam_->GetAllMapPoints(), orb_slam_->mpTracker->GetCurrentObjectCloud());
     PublishObjectDetections(orb_slam_->mpTracker->GetObjectPoints());
   }
 
 }
-//  std::vector<cv::Mat> Tracking::GetObjectPoints(){
 
 void Node::PublishObjectDetections (std::vector<cv::Mat> object_points) {
   if (object_points.size() == 0) {
@@ -153,15 +153,19 @@ void Node::PublishPositionAsPoseStamped (cv::Mat position) {
 }
 
 
-void Node::PublishRenderedImage (cv::Mat image, ORB_SLAM2::object_detection_box* object_detection_box) {
+void Node::PublishRenderedImage () {
 
-  if(object_detection_box != nullptr){
-    int x = object_detection_box->x;
-    int y = object_detection_box->y;
-    int w = object_detection_box->w;
-    int h = object_detection_box->h;
-    cv::rectangle(image, cv::Rect(x-int(w/2), y-int(h/2), w, h), cv::Scalar(0, 165, 255), 2);
-  }
+  
+  cv::Mat image = orb_slam_->DrawCurrentFrame();
+  // ORB_SLAM2::object_detection_box* object_detection_box = orb_slam_->mpTracker->GetLastBoundingBox();
+
+  // if(object_detection_box != nullptr){
+  //   int x = object_detection_box->x;
+  //   int y = object_detection_box->y;
+  //   int w = object_detection_box->w;
+  //   int h = object_detection_box->h;
+  //   cv::rectangle(image, cv::Rect(x-int(w/2), y-int(h/2), w, h), cv::Scalar(0, 165, 255), 2);
+  // }
 
   std_msgs::Header header;
   header.stamp = current_frame_time_;
